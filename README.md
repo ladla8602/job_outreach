@@ -1,10 +1,11 @@
 # Job Outreach
 
-A personal job-search automation tool that scrapes **7 remote job boards in parallel**, discovers hiring contact emails, drafts tailored cold-outreach emails with GPT-4o-mini, and surfaces everything in a clean Flask web UI — where you review, edit, and send with one click.
+A personal job-search automation tool that scrapes **7 remote job boards in parallel**, discovers hiring contact emails, drafts tailored cold-outreach emails with GPT-4o-mini, surfaces everything in a clean Flask web UI — and notifies you instantly on **Telegram and WhatsApp** when new jobs are found.
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat&logo=python&logoColor=white)
 ![Flask](https://img.shields.io/badge/Flask-2.x-000000?style=flat&logo=flask)
 ![OpenAI](https://img.shields.io/badge/GPT--4o--mini-OpenAI-412991?style=flat&logo=openai)
+![Telegram](https://img.shields.io/badge/Telegram-notifications-26A5E4?style=flat&logo=telegram)
 ![Tests](https://img.shields.io/badge/tests-31%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-blue)
 
@@ -27,23 +28,21 @@ A personal job-search automation tool that scrapes **7 remote job boards in para
 │  │ LinkedIn    │──┘     └───────────┘         │        │
 │  └─────────────┘                              ▼        │
 │  ThreadPoolExecutor                      jobs.json      │
-│  (~1-2s wall-clock)                                     │
-└──────────────────────────────┬──────────────────────────┘
-                               │
-                               ▼
-                ┌──────────────────────────┐
-                │        app.py (Flask)    │
-                │                          │
-                │  ┌────────────────────┐  │
-                │  │   Job review card  │  │
-                │  │  ┌──────────────┐  │  │
-                │  │  │ AI draft     │  │  │
-                │  │  │ (editable)   │  │  │
-                │  │  └──────────────┘  │  │
-                │  │  [Send] [Apply]    │  │
-                │  │           [Skip]   │  │
-                │  └────────────────────┘  │
-                └──────────────────────────┘
+│  (~1-2s wall-clock)                           │        │
+└──────────────────────────────┬────────────────┼────────┘
+                               │                │
+                               ▼                ▼
+                ┌──────────────────┐   ┌─────────────────┐
+                │   app.py (Flask) │   │   notifier.py   │
+                │                  │   │                 │
+                │  Job review card │   │ 📱 Telegram     │
+                │  ┌────────────┐  │   │ 💬 WhatsApp     │
+                │  │ AI draft   │  │   │  (Evolution API)│
+                │  │ (editable) │  │   └─────────────────┘
+                │  └────────────┘  │
+                │  [Send] [Apply]  │
+                │  [Gmail] [Skip]  │
+                └──────────────────┘
 ```
 
 ---
@@ -55,8 +54,9 @@ A personal job-search automation tool that scrapes **7 remote job boards in para
 - **AI-drafted cold outreach** — GPT-4o-mini writes a concise 3-sentence email matched to the job description and your tech profile
 - **Smart deduplication** — `seen_jobs.json` ensures only genuinely new listings are processed on each run
 - **Keyword filtering** — title-level and description-level filters keep only relevant software engineering roles; exclusions drop stacks outside your profile
-- **Flask web UI** — review cards with editable draft, one-click send (attaches your PDF resume), skip button, live background refresh with status polling
-- **Headless pipeline** — run `pipeline.py` from cron or CI without a browser
+- **Instant notifications** — Telegram bot and/or WhatsApp (Evolution API) message with job titles, companies, apply links, and contact emails as soon as a run completes
+- **Flask web UI** — job review cards with editable AI draft, one-click SMTP send with resume attached, Gmail compose fallback when SMTP is not configured, skip button, live background refresh
+- **Headless pipeline** — run `pipeline.py` from cron or GitHub Actions without a browser
 - **31 tests** — full pytest coverage across all modules
 
 ---
@@ -68,6 +68,7 @@ A personal job-search automation tool that scrapes **7 remote job boards in para
 | Job scraping | `requests`, `BeautifulSoup4`, `xml.etree`, concurrent `ThreadPoolExecutor` |
 | Email discovery | regex, BeautifulSoup4 page scrape, `ddgs` (DuckDuckGo) |
 | AI composition | OpenAI `gpt-4o-mini` via `openai` SDK |
+| Notifications | Telegram Bot API, WhatsApp via Evolution API |
 | Web UI | Flask, Jinja2, Tailwind CSS (CDN) |
 | Config | `python-dotenv` |
 | Tests | `pytest` |
@@ -79,8 +80,8 @@ A personal job-search automation tool that scrapes **7 remote job boards in para
 ### 1. Clone and create a virtual environment
 
 ```bash
-git clone https://github.com/your-username/job-outreach.git
-cd job-outreach
+git clone https://github.com/ladla8602/job_outreach.git
+cd job_outreach
 python3 -m venv venv
 source venv/bin/activate        # Windows: venv\Scripts\activate
 ```
@@ -105,10 +106,22 @@ OPENAI_API_KEY=sk-...
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=465
 SMTP_USER=you@gmail.com
-SMTP_PASS=xxxx-xxxx-xxxx-xxxx   # Gmail App Password (16 chars)
+SMTP_PASS=xxxx-xxxx-xxxx-xxxx        # Gmail App Password (16 chars)
+
+# Notifications — omit any block to skip that channel
+TELEGRAM_BOT_TOKEN=your-bot-token
+TELEGRAM_CHAT_ID=your-chat-id
+
+# WhatsApp via Evolution API (optional)
+EVOLUTION_API_URL=https://your-evolution-instance.com
+EVOLUTION_API_KEY=your-api-key
+EVOLUTION_INSTANCE=your-instance-name
+EVOLUTION_PHONE=919876543210@s.whatsapp.net
 ```
 
 > **Gmail App Password:** Google Account → Security → 2-Step Verification → App passwords → create one for "Mail".
+
+> **Telegram bot:** Create one via [@BotFather](https://t.me/botfather), then get your chat ID by sending any message to the bot and calling `https://api.telegram.org/bot<TOKEN>/getUpdates`.
 
 ### 4. Customize your profile
 
@@ -117,10 +130,10 @@ Open [composer.py](composer.py) and replace `_PROFILE` with your own experience,
 Also review the keyword lists in [job_finder.py](job_finder.py):
 
 ```python
-_TECH_KEYWORDS   # stacks you work with — positive signal
+_TECH_KEYWORDS    # stacks you work with — positive signal
 _EXCLUDE_KEYWORDS # stacks you don't work with — exclusion filter
-ROLE_KEYWORDS    # job titles that qualify
-FREELANCE_ONLY   # set True to keep only contract/part-time roles
+ROLE_KEYWORDS     # job titles that qualify
+FREELANCE_ONLY    # set True to keep only contract/part-time roles
 ```
 
 ---
@@ -138,7 +151,8 @@ On first run the job list will be empty. Click **Fetch Jobs** — the pipeline r
 
 For each job card you can:
 - **Edit** the AI-drafted email inline
-- **Send** — delivers via SMTP with your resume attached
+- **Send** — delivers via SMTP with your resume attached *(shown when SMTP is configured)*
+- **Open in Gmail** — opens Gmail compose in a new tab with To, Subject, and body pre-filled *(shown when SMTP is not configured)*
 - **Apply** — opens the original listing in a new tab
 - **Skip** — removes the card and marks it as seen
 
@@ -148,7 +162,7 @@ For each job card you can:
 python pipeline.py
 ```
 
-Fetches, enriches, and writes to `jobs.json`. Useful for scheduled runs without a browser open.
+Fetches, enriches, writes to `jobs.json`, and fires Telegram + WhatsApp notifications. Ideal for scheduled runs without a browser open.
 
 ### Legacy digest emailer
 
@@ -156,7 +170,19 @@ Fetches, enriches, and writes to `jobs.json`. Useful for scheduled runs without 
 python job_finder.py
 ```
 
-Emails you an HTML digest of new jobs (no GPT drafts, no web UI). Good for cron-only setups.
+Emails you an HTML digest of new jobs without GPT drafts or notifications. Useful for simple cron-only setups.
+
+---
+
+## Notifications
+
+When `pipeline.py` completes, **notifier.py** fires simultaneously to all configured channels.
+
+**Telegram** — formatted HTML message with job title, company, location, source, contact email, and a direct apply link for each new job.
+
+**WhatsApp (Evolution API)** — same content as plain text sent to your number via your self-hosted Evolution instance.
+
+Both channels are independently optional — configure only the ones you need by setting the corresponding env vars.
 
 ---
 
@@ -173,21 +199,26 @@ pytest -v        # with output
 
 **GitHub Actions (recommended — free, nothing to keep running)**
 
-Push to a private repo, then add these secrets under *Settings → Secrets → Actions*:
+Push to your repo, then add these secrets under *Settings → Secrets → Actions*:
 
-| Secret | Value |
-|--------|-------|
-| `OPENAI_API_KEY` | your OpenAI key |
-| `SMTP_USER` | your Gmail address |
-| `SMTP_PASS` | your Gmail App Password |
-| `RESUME_PATH` | path on the runner (or skip for draft-only) |
+| Secret | Description |
+|--------|-------------|
+| `OPENAI_API_KEY` | OpenAI key for email drafts |
+| `SMTP_USER` | Gmail address to send from |
+| `SMTP_PASS` | Gmail App Password |
+| `TELEGRAM_BOT_TOKEN` | Telegram bot token |
+| `TELEGRAM_CHAT_ID` | Your Telegram chat ID |
+| `EVOLUTION_API_URL` | Evolution API base URL *(optional)* |
+| `EVOLUTION_API_KEY` | Evolution API key *(optional)* |
+| `EVOLUTION_INSTANCE` | Evolution instance name *(optional)* |
+| `EVOLUTION_PHONE` | WhatsApp number e.g. `919876543210@s.whatsapp.net` *(optional)* |
 
-The included [`.github/workflows/job-finder.yml`](.github/workflows/job-finder.yml) runs at 06:00 & 18:00 UTC — adjust the cron lines to your timezone.
+The included [`.github/workflows/job-finder.yml`](.github/workflows/job-finder.yml) runs `pipeline.py` at **06:00 & 18:00 UTC** (11:30 AM & 11:30 PM IST). You can also trigger it manually from the Actions tab.
 
 **cron (local machine)**
 
 ```cron
-0 9,21 * * * cd /path/to/job-outreach && venv/bin/python pipeline.py >> run.log 2>&1
+0 9,21 * * * cd /path/to/job_outreach && venv/bin/python pipeline.py >> run.log 2>&1
 ```
 
 ---
@@ -195,12 +226,13 @@ The included [`.github/workflows/job-finder.yml`](.github/workflows/job-finder.y
 ## Project structure
 
 ```
-job-outreach/
+job_outreach/
 ├── app.py            # Flask web UI + REST endpoints
-├── pipeline.py       # Orchestrator: fetch → find email → compose → save
-├── job_finder.py     # Job board scrapers + legacy digest emailer
+├── pipeline.py       # Orchestrator: fetch → find email → compose → notify → save
+├── job_finder.py     # Job board scrapers (7 sources) + legacy digest emailer
 ├── email_finder.py   # 3-step hiring email discovery
 ├── composer.py       # GPT-4o-mini cold outreach composer
+├── notifier.py       # Telegram + WhatsApp (Evolution API) notifications
 ├── config.py         # Env var loading
 ├── templates/
 │   └── index.html    # Tailwind job review UI
