@@ -1,140 +1,289 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Job Outreach</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Job Outreach</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @keyframes slideIn { from { opacity:0; transform:translateY(10px); } to { opacity:1; transform:translateY(0); } }
+    .card-in { animation: slideIn 0.22s ease forwards; }
+    @keyframes spin { to { transform:rotate(360deg); } }
+    .spin { animation: spin 0.75s linear infinite; display:inline-block; }
+  </style>
 </head>
-<body class="bg-gray-50 min-h-screen py-8">
-<div class="max-w-3xl mx-auto px-4">
+<body class="bg-slate-50 min-h-screen">
 
-    <div class="flex items-center justify-between mb-6">
-        <h1 class="text-2xl font-bold text-gray-900">Job Outreach</h1>
-        <p class="text-sm text-gray-500">
-            <span class="font-medium text-blue-600">{{ counts.pending }}</span> pending ·
-            <span class="font-medium text-green-600">{{ counts.sent }}</span> sent ·
-            <span class="font-medium text-gray-400">{{ counts.skipped }}</span> skipped
-        </p>
+<!-- Sticky header -->
+<header class="sticky top-0 z-20 bg-white/95 backdrop-blur border-b border-slate-200 shadow-sm">
+  <div class="max-w-2xl mx-auto px-4 h-14 flex items-center gap-3">
+    <span class="font-bold text-slate-900 text-sm flex-1">Job Outreach</span>
+    <div class="flex items-center gap-1.5 text-xs font-medium">
+      <span class="bg-blue-50 text-blue-700 px-2.5 py-1 rounded-full">{{ counts.pending }} pending</span>
+      <span class="bg-emerald-50 text-emerald-700 px-2.5 py-1 rounded-full">{{ counts.sent }} sent</span>
+      <span class="bg-slate-100 text-slate-500 px-2.5 py-1 rounded-full">{{ counts.skipped }} skipped</span>
     </div>
+    <button id="fetch-btn" onclick="fetchJobs()"
+            class="flex items-center gap-1.5 bg-slate-900 hover:bg-slate-700 text-white
+                   text-xs font-medium px-3 py-1.5 rounded-lg transition-colors disabled:opacity-40 shrink-0">
+      <svg id="fetch-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+              d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+      </svg>
+      <span id="fetch-label">Fetch Jobs</span>
+    </button>
+  </div>
+</header>
 
-    {% for job in jobs %}
-    <div id="job-{{ loop.index0 }}"
-         class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-4
-                border-l-4 {% if job.freelance %}border-l-green-400{% else %}border-l-blue-400{% endif %}
-                transition-opacity duration-500">
+<!-- Toast container -->
+<div id="toasts" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none"></div>
 
-        <div class="mb-3">
-            <h2 class="font-semibold text-gray-900">
-                {% if job.freelance %}🟢 {% endif %}{{ job.title }}
-            </h2>
-            <p class="text-gray-500 text-sm">{{ job.company }} · {{ job.location }}</p>
-            <span class="inline-block mt-1 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
-                {{ job.source }}
-            </span>
-        </div>
+<!-- Job list -->
+<main class="max-w-2xl mx-auto px-4 py-6 space-y-4">
 
-        <div class="text-sm mb-3 space-y-1">
-            {% if job.hiring_email %}
-            <p>
-                <span class="text-gray-500">To:</span>
-                <span class="text-gray-800 font-mono">{{ job.hiring_email }}</span>
-                {% for hint in job.linkedin_hints %}
-                <a href="{{ hint }}" target="_blank"
-                   class="ml-2 text-blue-500 hover:underline text-xs">👤 Profile</a>
-                {% endfor %}
-            </p>
-            {% else %}
-            <p class="text-amber-600">
-                No email found
-                {% for hint in job.linkedin_hints %}
-                · <a href="{{ hint }}" target="_blank"
-                     class="text-blue-500 hover:underline">👤 Profile</a>
-                {% endfor %}
-            </p>
-            {% endif %}
-            <p>
-                <span class="text-gray-500">Subject:</span>
-                <span class="text-gray-700">{{ job.email_subject }}</span>
-            </p>
-        </div>
+  {% for job in jobs %}
+  <article id="job-{{ loop.index0 }}"
+           class="card-in bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+    <div class="flex">
+      <!-- Left accent bar -->
+      <div class="w-1 shrink-0 {% if job.freelance %}bg-emerald-400{% else %}bg-blue-500{% endif %}"></div>
 
-        <form onsubmit="return false;">
-            <input type="hidden" name="url" value="{{ job.url }}">
-            <input type="hidden" name="subject" value="{{ job.email_subject }}">
-            <textarea name="body"
-                      class="w-full border border-gray-200 rounded-lg p-3 text-sm font-mono
-                             h-40 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 mb-3">{{ job.email_draft }}</textarea>
+      <div class="flex-1 p-4">
 
-            {% if resume_name %}
-            <p class="text-xs text-gray-400 mb-2">📎 {{ resume_name }}</p>
-            {% endif %}
-
-            <div class="flex items-center gap-3">
-                {% if job.hiring_email %}
-                <button onclick="sendJob(this, {{ loop.index0 }})"
-                        class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-1.5
-                               rounded-lg transition-colors disabled:opacity-50">
-                    Send Email
-                </button>
-                {% endif %}
-                <a href="{{ job.apply_link }}" target="_blank"
-                   class="text-sm text-blue-600 hover:underline">Open Apply Link →</a>
-                <button onclick="skipJob(this, {{ loop.index0 }})"
-                        class="ml-auto text-sm text-gray-400 hover:text-gray-600">
-                    Skip
-                </button>
+        <!-- Title row -->
+        <div class="flex items-start gap-3 mb-3">
+          <div class="w-9 h-9 rounded-lg bg-slate-100 text-slate-600 font-bold text-sm
+                      flex items-center justify-center shrink-0 uppercase select-none">
+            {{ (job.company or '?')[0] }}
+          </div>
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <h2 class="font-semibold text-slate-900 text-sm leading-snug">{{ job.title }}</h2>
+              {% if job.freelance %}
+              <span class="text-xs bg-emerald-50 text-emerald-700 border border-emerald-200
+                           px-1.5 py-0.5 rounded font-medium">Contract</span>
+              {% endif %}
             </div>
+            <p class="text-slate-500 text-xs mt-0.5">{{ job.company or 'Unknown' }} · {{ job.location }}</p>
+          </div>
+          <span class="text-xs text-slate-400 bg-slate-50 border border-slate-200
+                       px-2 py-0.5 rounded-full shrink-0 whitespace-nowrap">{{ job.source }}</span>
+        </div>
+
+        <!-- Contact chips -->
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+          {% if job.hiring_email %}
+          <span class="inline-flex items-center gap-1.5 text-xs bg-blue-50 text-blue-700
+                       border border-blue-100 px-2.5 py-1 rounded-full font-mono">
+            <svg class="w-3 h-3 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            {{ job.hiring_email }}
+          </span>
+          {% else %}
+          <span class="inline-flex items-center gap-1 text-xs text-amber-600 bg-amber-50
+                       border border-amber-100 px-2.5 py-1 rounded-full">
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+            </svg>
+            No email found
+          </span>
+          {% endif %}
+          {% for hint in job.linkedin_hints[:2] %}
+          <a href="{{ hint }}" target="_blank"
+             class="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700
+                    bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-full transition-colors">
+            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M20.447 20.452h-3.554v-5.569c0-1.328-.027-3.037-1.852-3.037-1.853 0-2.136 1.445-2.136 2.939v5.667H9.351V9h3.414v1.561h.046c.477-.9 1.637-1.85 3.37-1.85 3.601 0 4.267 2.37 4.267 5.455v6.286zM5.337 7.433c-1.144 0-2.063-.926-2.063-2.065 0-1.138.92-2.063 2.063-2.063 1.14 0 2.064.925 2.064 2.063 0 1.139-.925 2.065-2.064 2.065zm1.782 13.019H3.555V9h3.564v11.452zM22.225 0H1.771C.792 0 0 .774 0 1.729v20.542C0 23.227.792 24 1.771 24h20.451C23.2 24 24 23.227 24 22.271V1.729C24 .774 23.2 0 22.222 0h.003z"/>
+            </svg>
+            LinkedIn
+          </a>
+          {% endfor %}
+        </div>
+
+        <!-- Subject -->
+        <div class="mb-3">
+          <p class="text-xs text-slate-400 uppercase tracking-wide mb-0.5">Subject</p>
+          <p class="text-sm text-slate-700">{{ job.email_subject }}</p>
+        </div>
+
+        <!-- Draft form -->
+        <form onsubmit="return false;">
+          <input type="hidden" name="url" value="{{ job.url }}">
+          <input type="hidden" name="subject" value="{{ job.email_subject }}">
+
+          <p class="text-xs text-slate-400 uppercase tracking-wide mb-1.5">Email Draft</p>
+          <textarea name="body"
+                    class="w-full border border-slate-200 rounded-lg p-3 text-sm text-slate-700
+                           h-32 resize-y bg-white leading-relaxed
+                           focus:outline-none focus:ring-2 focus:ring-blue-300 focus:border-blue-300
+                           transition-shadow mb-2.5">{{ job.email_draft }}</textarea>
+
+          {% if resume_name %}
+          <p class="text-xs text-slate-400 mb-3 flex items-center gap-1.5">
+            <svg class="w-3.5 h-3.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"/>
+            </svg>
+            {{ resume_name }}
+          </p>
+          {% endif %}
+
+          <div class="flex items-center gap-2">
+            {% if job.hiring_email %}
+            <button onclick="sendJob(this, {{ loop.index0 }})"
+                    class="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700
+                           text-white text-sm font-medium px-4 py-1.5 rounded-lg
+                           transition-colors disabled:opacity-40">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+              </svg>
+              Send
+            </button>
+            {% endif %}
+            <a href="{{ job.apply_link }}" target="_blank"
+               class="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800
+                      px-2 py-1.5 transition-colors">
+              Apply
+              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+              </svg>
+            </a>
+            <button onclick="skipJob(this, {{ loop.index0 }})"
+                    class="ml-auto inline-flex items-center gap-1 text-sm text-slate-400
+                           hover:text-slate-700 px-2 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">
+              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+              </svg>
+              Skip
+            </button>
+          </div>
         </form>
-    </div>
-    {% endfor %}
 
-    {% if not jobs %}
-    <div class="text-center py-16 text-gray-400">
-        <p class="text-lg mb-2">No pending jobs.</p>
-        <p class="text-sm">Run
-            <code class="bg-gray-100 px-1 py-0.5 rounded">python pipeline.py</code>
-            to fetch new listings.
-        </p>
+      </div>
     </div>
-    {% endif %}
+  </article>
+  {% endfor %}
 
-</div>
+  {% if not jobs %}
+  <div class="flex flex-col items-center justify-center py-24 text-center">
+    <div class="w-14 h-14 bg-slate-100 rounded-2xl flex items-center justify-center mb-4">
+      <svg class="w-7 h-7 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+              d="M21 13.255A23.931 23.931 0 0112 15c-3.183 0-6.22-.62-9-1.745M16 6V4a2 2 0 00-2-2h-4a2 2 0 00-2 2v2m4 6h.01M5 20h14a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+    </div>
+    <p class="font-medium text-slate-700 mb-1">No pending jobs</p>
+    <p class="text-slate-400 text-sm mb-5">Fetch the latest listings to get started.</p>
+    <button onclick="fetchJobs()"
+            class="bg-slate-900 hover:bg-slate-700 text-white text-sm font-medium
+                   px-4 py-2 rounded-lg transition-colors">
+      Fetch Jobs Now
+    </button>
+  </div>
+  {% endif %}
+
+</main>
+
 <script>
-async function sendJob(btn, idx) {
-    const card = document.getElementById('job-' + idx);
-    const form = card.querySelector('form');
-    btn.disabled = true;
-    btn.textContent = 'Sending…';
-    const fd = new FormData(form);
-    try {
-        const res = await fetch('/send', {method: 'POST', body: fd});
-        const data = await res.json();
-        if (data.ok) {
-            fadeOut(card);
-        } else {
-            alert('Error: ' + (data.error || 'unknown'));
-            btn.disabled = false;
-            btn.textContent = 'Send Email';
-        }
-    } catch (e) {
-        alert('Network error');
-        btn.disabled = false;
-        btn.textContent = 'Send Email';
-    }
-}
+const SPIN_ICON = `<svg class="w-3.5 h-3.5 spin" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>`;
 
-async function skipJob(btn, idx) {
-    const card = document.getElementById('job-' + idx);
-    const form = card.querySelector('form');
-    const fd = new FormData(form);
-    const res = await fetch('/skip', {method: 'POST', body: fd});
-    if (res.ok) fadeOut(card);
+function toast(msg, type = 'info') {
+  const colors = { info: 'bg-slate-800 text-white', success: 'bg-emerald-600 text-white', error: 'bg-red-600 text-white' };
+  const el = document.createElement('div');
+  el.className = `pointer-events-auto ${colors[type] || colors.info} text-sm px-4 py-2.5 rounded-lg shadow-lg max-w-xs`;
+  el.textContent = msg;
+  document.getElementById('toasts').prepend(el);
+  setTimeout(() => { el.style.opacity = '0'; el.style.transition = 'opacity 0.3s'; }, 3200);
+  setTimeout(() => el.remove(), 3600);
 }
 
 function fadeOut(el) {
-    el.style.opacity = '0';
-    setTimeout(() => el.remove(), 500);
+  el.style.transition = 'all 0.35s ease';
+  el.style.opacity = '0';
+  el.style.transform = 'translateX(20px)';
+  setTimeout(() => el.remove(), 380);
+}
+
+async function sendJob(btn, idx) {
+  const card = document.getElementById('job-' + idx);
+  const origHTML = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = SPIN_ICON + ' <span>Sending…</span>';
+  try {
+    const res = await fetch('/send', { method: 'POST', body: new FormData(card.querySelector('form')) });
+    const data = await res.json();
+    if (data.ok) {
+      toast('Email sent!', 'success');
+      fadeOut(card);
+    } else {
+      toast(data.error || 'Send failed', 'error');
+      btn.disabled = false;
+      btn.innerHTML = origHTML;
+    }
+  } catch {
+    toast('Network error', 'error');
+    btn.disabled = false;
+    btn.innerHTML = origHTML;
+  }
+}
+
+async function skipJob(btn, idx) {
+  const card = document.getElementById('job-' + idx);
+  const res = await fetch('/skip', { method: 'POST', body: new FormData(card.querySelector('form')) });
+  if (res.ok) { toast('Skipped'); fadeOut(card); }
+}
+
+let _poll = null;
+
+async function fetchJobs() {
+  const btn = document.getElementById('fetch-btn');
+  const label = document.getElementById('fetch-label');
+  const icon = document.getElementById('fetch-icon');
+
+  btn.disabled = true;
+  label.textContent = 'Fetching…';
+  icon.classList.add('spin');
+  toast('Fetching new jobs — this takes ~30s…');
+
+  try {
+    const res = await fetch('/refresh', { method: 'POST' });
+    const data = await res.json();
+    if (!data.ok) {
+      toast(data.error || 'Failed to start', 'error');
+      resetBtn(btn, label, icon);
+      return;
+    }
+    _poll = setInterval(async () => {
+      try {
+        const s = await (await fetch('/refresh/status')).json();
+        if (!s.running) {
+          clearInterval(_poll);
+          resetBtn(btn, label, icon);
+          if (s.error) {
+            toast('Error: ' + s.error, 'error');
+          } else {
+            const n = s.new_count;
+            toast(n + ' new job' + (n !== 1 ? 's' : '') + ' found', 'success');
+            setTimeout(() => location.reload(), 900);
+          }
+        }
+      } catch { /* keep polling */ }
+    }, 2000);
+  } catch {
+    toast('Network error', 'error');
+    resetBtn(btn, label, icon);
+  }
+}
+
+function resetBtn(btn, label, icon) {
+  btn.disabled = false;
+  label.textContent = 'Fetch Jobs';
+  icon.classList.remove('spin');
 }
 </script>
 </body>

@@ -17,8 +17,10 @@ import json
 import smtplib
 import datetime as dt
 import xml.etree.ElementTree as ET
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from email.message import EmailMessage
 from pathlib import Path
+from urllib.parse import urlparse, urlunparse
 
 import requests
 
@@ -26,13 +28,45 @@ import requests
 # Configuration  (edit these, or override the email ones via env vars/secrets)
 # ---------------------------------------------------------------------------
 
-# Roles you care about — matched against title + description, case-insensitive.
+# Tech the user actually works with — any match is a strong positive signal.
+_TECH_KEYWORDS = {
+    "angular", "react", "next.js", "nextjs", "vue",
+    "node", "nodejs", "nestjs", "express",
+    "typescript", "javascript",
+    "python", "fastapi", "django", "flask",
+    "flutter", "dart",
+}
+
+# Generic role titles — kept only when no excluded stack is mentioned.
 ROLE_KEYWORDS = [
     "software engineer", "software developer", "full stack", "full-stack",
     "fullstack", "frontend", "front-end", "backend", "back-end",
-    "web developer", "node", "nestjs", "angular", "react", "next.js",
-    "typescript", "javascript", "python", "flutter",
+    "web developer",
 ]
+
+# The job TITLE must contain at least one of these — prevents non-software
+# jobs from slipping in via description/tag noise.
+_TITLE_KEYWORDS = {
+    "engineer", "developer", "dev", "programmer", "architect",
+    "software", "fullstack", "full-stack", "full stack",
+    "frontend", "front-end", "backend", "back-end", "web",
+    "angular", "react", "vue", "node", "nestjs",
+    "typescript", "javascript", "python", "flutter", "next.js",
+}
+
+# Stacks NOT in the user's profile — exclude jobs that mention these
+# without also mentioning a known tech keyword.
+_EXCLUDE_KEYWORDS = [
+    ".net", "c#", "asp.net", "dotnet",
+    "java ", "spring boot", "spring framework",
+    "ruby on rails", " rails", " php", "laravel",
+    "golang", " rust ", " scala ", "kotlin",
+    "android native", "ios native", "objective-c", " swift ",
+    "blazor", "xamarin",
+]
+
+# Drop jobs older than this many days (keep if date is missing/unparseable).
+_MAX_AGE_DAYS = 30
 
 # True  -> only keep jobs that look part-time / freelance / contract.
 # False -> keep all remote software roles, but TAG the freelance-looking ones.
@@ -61,14 +95,39 @@ TIMEOUT = 30
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _match_title(title: str) -> bool:
+    t = title.lower()
+    return any(k in t for k in _TITLE_KEYWORDS)
+
+
 def _match_role(text: str) -> bool:
     t = text.lower()
-    return any(k in t for k in ROLE_KEYWORDS)
+    if any(k in t for k in _TECH_KEYWORDS):
+        return True
+    if any(k in t for k in ROLE_KEYWORDS):
+        return not any(k in t for k in _EXCLUDE_KEYWORDS)
+    return False
 
 
 def _looks_freelance(text: str) -> bool:
     t = text.lower()
     return any(k in t for k in FREELANCE_KEYWORDS)
+
+
+def _is_recent(date_str: str) -> bool:
+    """Return True if within _MAX_AGE_DAYS, or if date is absent/unparseable."""
+    if not date_str:
+        return True
+    import email.utils as _eu
+    for parser in (_eu.parsedate_to_datetime, dt.datetime.fromisoformat):
+        try:
+            d = parser(date_str.strip())
+            if d.tzinfo is None:
+                d = d.replace(tzinfo=dt.timezone.utc)
+            return (dt.datetime.now(dt.timezone.utc) - d).days <= _MAX_AGE_DAYS
+        except Exception:
+            continue
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -91,7 +150,7 @@ def fetch_remoteok():
         desc = item.get("description", "") or ""
         tags = item.get("tags", []) or []
         blob = " ".join([title, desc, " ".join(tags)])
-        if not _match_role(blob):
+        if not _match_title(title) or not _match_role(blob) or not _is_recent(item.get("date")):
             continue
         jobs.append({
             "title": title,
@@ -120,7 +179,7 @@ def fetch_remotive():
         desc = item.get("description", "") or ""
         jtype = (item.get("job_type", "") or "")
         blob = " ".join([title, desc, jtype])
-        if not _match_role(blob):
+        if not _match_title(title) or not _match_role(blob) or not _is_recent(item.get("publication_date")):
             continue
         jobs.append({
             "title": title,
@@ -152,7 +211,7 @@ def fetch_arbeitnow():
         tags = item.get("tags", []) or []
         jtypes = item.get("job_types", []) or []
         blob = " ".join([title, desc, " ".join(tags), " ".join(jtypes)])
-        if not _match_role(blob):
+        if not _match_title(title) or not _match_role(blob) or not _is_recent(item.get("created_at")):
             continue
         jobs.append({
             "title": title,
@@ -182,7 +241,7 @@ def fetch_weworkremotely():
         link = (item.findtext("link") or "").strip()
         desc = (item.findtext("description") or "")
         blob = " ".join([title, desc])
-        if not _match_role(blob):
+        if not _match_title(title) or not _match_role(blob) or not _is_recent(item.findtext("pubDate")):
             continue
         company, _, jobtitle = title.partition(":")  # WWR title: "Company: Role"
         jobs.append({
@@ -192,6 +251,51 @@ def fetch_weworkremotely():
             "url": link,
             "source": "WeWorkRemotely",
             "freelance": _looks_freelance(blob),
+            "description": desc,
+        })
+    return jobs
+
+
+def fetch_jobicy():
+    """Jobicy — tech-focused remote job board with a public API."""
+    _TAGS = ("react", "angular", "typescript", "python", "full-stack", "javascript")
+
+    def _fetch_tag(tag):
+        r = requests.get("https://jobicy.com/api/v2/remote-jobs",
+                         params={"count": 20, "tag": tag},
+                         headers=HEADERS, timeout=TIMEOUT)
+        r.raise_for_status()
+        return r.json().get("jobs", [])
+
+    raw: list = []
+    with ThreadPoolExecutor(max_workers=len(_TAGS)) as pool:
+        futures = {pool.submit(_fetch_tag, tag): tag for tag in _TAGS}
+        for fut in as_completed(futures):
+            try:
+                raw.extend(fut.result())
+            except Exception as e:
+                print(f"[jobicy:{futures[fut]}] error: {e}")
+
+    jobs = []
+    seen_urls: set = set()
+    for item in raw:
+        url = item.get("url", "")
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+        title = item.get("jobTitle", "")
+        desc = (item.get("jobDescription") or item.get("jobExcerpt", ""))
+        jtype = " ".join(item.get("jobType") or [])
+        blob = " ".join([title, desc, jtype])
+        if not _match_title(title) or not _match_role(blob) or not _is_recent(item.get("pubDate")):
+            continue
+        jobs.append({
+            "title": title,
+            "company": item.get("companyName", ""),
+            "location": item.get("jobGeo") or "Remote",
+            "url": url,
+            "source": "Jobicy",
+            "freelance": _looks_freelance(blob) or "part" in jtype.lower() or "contract" in jtype.lower(),
             "description": desc,
         })
     return jobs
@@ -216,7 +320,7 @@ def fetch_hackernews():
                             headers=HEADERS, timeout=TIMEOUT).json()
         for c in item.get("children", []):
             text = c.get("text") or ""
-            if not text or not _match_role(text) or "remote" not in text.lower():
+            if not text or not _match_role(text) or "remote" not in text.lower() or not _is_recent(c.get("created_at")):
                 continue
             clean = re.sub(r"\s+", " ", re.sub("<[^>]+>", " ", text)).strip()
             jobs.append({
@@ -230,6 +334,96 @@ def fetch_hackernews():
             })
     except Exception as e:
         print(f"[hackernews] error: {e}")
+    return jobs
+
+
+_LI_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/125.0.0.0 Safari/537.36"
+    ),
+    "Accept-Language": "en-US,en;q=0.9",
+}
+_LI_SEARCHES = [
+    "software engineer remote",
+    "full stack developer remote",
+    "frontend developer remote",
+    "backend developer remote",
+    "python developer remote",
+    "react developer remote",
+]
+
+
+def fetch_linkedin():
+    """LinkedIn public guest job search API — no login required."""
+    from bs4 import BeautifulSoup
+
+    _requests = [
+        (kw, start)
+        for kw in _LI_SEARCHES
+        for start in (0, 25)
+    ]
+
+    def _fetch_page(kw, start):
+        r = requests.get(
+            "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search",
+            params={"keywords": kw, "f_WT": "2", "start": str(start)},
+            headers=_LI_HEADERS,
+            timeout=TIMEOUT,
+        )
+        if r.status_code != 200:
+            return []
+        soup = BeautifulSoup(r.text, "html.parser")
+        return soup.select("li .job-search-card")
+
+    all_cards = []
+    with ThreadPoolExecutor(max_workers=len(_requests)) as pool:
+        futures = {pool.submit(_fetch_page, kw, start): (kw, start) for kw, start in _requests}
+        for fut in as_completed(futures):
+            try:
+                all_cards.extend(fut.result())
+            except Exception as e:
+                kw, start = futures[fut]
+                print(f"[linkedin] error ({kw} start={start}): {e}")
+
+    seen_urls: set = set()
+    jobs = []
+    for card in all_cards:
+        a = card.select_one("a.base-card__full-link")
+        if not a:
+            continue
+        parsed = urlparse(a["href"])
+        url = urlunparse(parsed._replace(query="", fragment=""))
+        if not url or url in seen_urls:
+            continue
+        seen_urls.add(url)
+
+        title = (card.select_one(".base-search-card__title") or {}).get_text(strip=True)
+        company = (card.select_one(".base-search-card__subtitle") or {}).get_text(strip=True)
+        location = (card.select_one(".job-search-card__location") or {}).get_text(strip=True)
+        t = card.select_one("time")
+        date_str = t.get("datetime", "") if t else ""
+
+        if not title or not _match_title(title):
+            continue
+        blob = f"{title} {company} {location}".lower()
+        if not _match_role(blob):
+            continue
+        if not _is_recent(date_str):
+            continue
+
+        jobs.append({
+            "title": title,
+            "company": company,
+            "url": url,
+            "location": location,
+            "date": date_str,
+            "source": "linkedin",
+            "freelance": _looks_freelance(blob),
+        })
+
+    print(f"[linkedin] {len(jobs)} jobs")
     return jobs
 
 
@@ -254,10 +448,17 @@ def save_seen(seen):
 
 
 def collect_jobs():
+    fetchers = (fetch_remoteok, fetch_remotive, fetch_arbeitnow,
+                fetch_weworkremotely, fetch_hackernews, fetch_jobicy,
+                fetch_linkedin)
     all_jobs = []
-    for fn in (fetch_remoteok, fetch_remotive, fetch_arbeitnow,
-               fetch_weworkremotely, fetch_hackernews):
-        all_jobs.extend(fn())
+    with ThreadPoolExecutor(max_workers=len(fetchers)) as pool:
+        futures = {pool.submit(fn): fn.__name__ for fn in fetchers}
+        for fut in as_completed(futures):
+            try:
+                all_jobs.extend(fut.result())
+            except Exception as e:
+                print(f"[{futures[fut]}] error: {e}")
     if FREELANCE_ONLY:
         all_jobs = [j for j in all_jobs if j["freelance"]]
     unique = {j["url"]: j for j in all_jobs if j["url"]}  # dedupe by URL

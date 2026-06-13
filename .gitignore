@@ -4,3 +4,6 @@ jobs.json
 seen_jobs.json
 __pycache__/
 *.pyc
+docs/
+.pytest_cache/
+job-finder.yml

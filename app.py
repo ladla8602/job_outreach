@@ -1,11 +1,15 @@
 import json
 import smtplib
+import threading
 from email.message import EmailMessage
 
-from flask import Flask, render_template, request, jsonify
+from flask import Flask, jsonify, render_template, request
 import config
 
 app = Flask(__name__)
+
+_refresh_lock = threading.Lock()
+_refresh_state: dict = {"running": False, "error": None, "new_count": 0}
 
 
 def _read_jobs():
@@ -39,6 +43,20 @@ def index():
     pending = [j for j in all_jobs if j.get("status") == "pending"]
     resume_name = config.RESUME_PATH.name if config.RESUME_PATH and config.RESUME_PATH.is_file() else None
     return render_template("index.html", jobs=pending, counts=counts, resume_name=resume_name)
+
+
+@app.route("/jobs")
+def api_jobs():
+    all_jobs = _read_jobs()
+    counts = {
+        "pending": sum(1 for j in all_jobs if j.get("status") == "pending"),
+        "sent": sum(1 for j in all_jobs if j.get("status") == "sent"),
+        "skipped": sum(1 for j in all_jobs if j.get("status") == "skipped"),
+    }
+    pending = [j for j in all_jobs if j.get("status") == "pending"]
+    resume_name = config.RESUME_PATH.name if config.RESUME_PATH and config.RESUME_PATH.is_file() else None
+    smtp_ready = bool(config.SMTP_USER and config.SMTP_PASS and config.SMTP_PASS != "xxxx-xxxx-xxxx-xxxx")
+    return jsonify({"jobs": pending, "counts": counts, "resume_name": resume_name, "smtp_ready": smtp_ready})
 
 
 @app.route("/skip", methods=["POST"])
@@ -92,5 +110,33 @@ def send_email():
     return jsonify({"ok": True})
 
 
+@app.route("/refresh", methods=["POST"])
+def refresh_jobs():
+    with _refresh_lock:
+        if _refresh_state["running"]:
+            return jsonify({"error": "Refresh already in progress"}), 409
+        _refresh_state.update({"running": True, "error": None, "new_count": 0})
+
+    def _run():
+        try:
+            import pipeline
+            before = len([j for j in _read_jobs() if j.get("status") == "pending"])
+            pipeline.run()
+            after = len([j for j in _read_jobs() if j.get("status") == "pending"])
+            _refresh_state["new_count"] = max(0, after - before)
+        except Exception as e:
+            _refresh_state["error"] = str(e)
+        finally:
+            _refresh_state["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return jsonify({"ok": True})
+
+
+@app.route("/refresh/status")
+def refresh_status():
+    return jsonify(dict(_refresh_state))
+
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=True, port=8000, threaded=True)
