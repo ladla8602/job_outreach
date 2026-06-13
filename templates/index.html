@@ -128,8 +128,8 @@ async function skipJob(btn, idx) {
     const card = document.getElementById('job-' + idx);
     const form = card.querySelector('form');
     const fd = new FormData(form);
-    await fetch('/skip', {method: 'POST', body: fd});
-    fadeOut(card);
+    const res = await fetch('/skip', {method: 'POST', body: fd});
+    if (res.ok) fadeOut(card);
 }
 
 function fadeOut(el) {

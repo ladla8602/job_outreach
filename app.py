@@ -83,8 +83,10 @@ def send_email():
         with smtplib.SMTP_SSL(config.SMTP_HOST, config.SMTP_PORT) as server:
             server.login(config.SMTP_USER, config.SMTP_PASS)
             server.send_message(msg)
+    except smtplib.SMTPAuthenticationError:
+        return jsonify({"error": "SMTP authentication failed — check SMTP_USER and SMTP_PASS in .env"}), 500
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": f"Send failed: {type(e).__name__}"}), 500
 
     _update_status(url, "sent")
     return jsonify({"ok": True})
