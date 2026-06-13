@@ -47,9 +47,9 @@ def _scan_page(url: str) -> tuple:
         soup = BeautifulSoup(r.text, "html.parser")
         for a in soup.find_all("a", href=True):
             if a["href"].startswith("mailto:"):
-                email = a["href"][7:].split("?")[0].strip()
-                if email:
-                    return email, []
+                candidate = a["href"][7:].split("?")[0].strip()
+                if candidate and EMAIL_RE.match(candidate):
+                    return candidate, []
         email = _extract_email(soup.get_text(" "))
         hints = list(set(LINKEDIN_RE.findall(r.text)))
         return email, hints
