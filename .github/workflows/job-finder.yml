@@ -1,0 +1,43 @@
+name: Job Finder
+
+on:
+  schedule:
+    # Times are UTC. 06:00 & 18:00 UTC = 11:30 AM & 11:30 PM IST.
+    - cron: "0 6 * * *"
+    - cron: "0 18 * * *"
+  workflow_dispatch: {}   # lets you run it manually from the Actions tab
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      # Persist seen_jobs.json and jobs.json across runs so only NEW jobs are processed.
+      - name: Restore job state
+        uses: actions/cache@v4
+        with:
+          path: |
+            seen_jobs.json
+            jobs.json
+          key: job-state-${{ github.run_id }}
+          restore-keys: job-state-
+
+      - name: Run pipeline
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          EVOLUTION_API_URL: ${{ secrets.EVOLUTION_API_URL }}
+          EVOLUTION_API_KEY: ${{ secrets.EVOLUTION_API_KEY }}
+          EVOLUTION_INSTANCE: ${{ secrets.EVOLUTION_INSTANCE }}
+          EVOLUTION_PHONE: ${{ secrets.EVOLUTION_PHONE }}
+        run: python pipeline.py
