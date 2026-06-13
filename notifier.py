@@ -40,9 +40,21 @@ def _whatsapp(text: str) -> None:
         print(f"[notifier:whatsapp] error: {e}")
 
 
+def _relevance_score(job: dict) -> int:
+    score = 0
+    if job.get("hiring_email"):
+        score += 2   # directly contactable — most actionable
+    if job.get("freelance"):
+        score += 1   # contract/part-time match
+    if job.get("description"):
+        score += 1   # has detail, better draft quality
+    return score
+
+
 def _build_message(new_jobs: list, total_scraped: int) -> tuple:
     count = len(new_jobs)
-    shown = new_jobs[:_MAX_JOBS_IN_MSG]
+    ranked = sorted(new_jobs, key=_relevance_score, reverse=True)
+    shown = ranked[:_MAX_JOBS_IN_MSG]
     overflow = count - len(shown)
 
     # --- Telegram (HTML) ---
