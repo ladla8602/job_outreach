@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Job Outreach</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-50 min-h-screen py-8">
+<div class="max-w-3xl mx-auto px-4">
+
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold text-gray-900">Job Outreach</h1>
+        <p class="text-sm text-gray-500">
+            <span class="font-medium text-blue-600">{{ counts.pending }}</span> pending ·
+            <span class="font-medium text-green-600">{{ counts.sent }}</span> sent ·
+            <span class="font-medium text-gray-400">{{ counts.skipped }}</span> skipped
+        </p>
+    </div>
+
+    {% for job in jobs %}
+    <div id="job-{{ loop.index0 }}"
+         class="bg-white rounded-xl shadow-sm border border-gray-100 p-5 mb-4
+                border-l-4 {% if job.freelance %}border-l-green-400{% else %}border-l-blue-400{% endif %}
+                transition-opacity duration-500">
+
+        <div class="mb-3">
+            <h2 class="font-semibold text-gray-900">
+                {% if job.freelance %}🟢 {% endif %}{{ job.title }}
+            </h2>
+            <p class="text-gray-500 text-sm">{{ job.company }} · {{ job.location }}</p>
+            <span class="inline-block mt-1 text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
+                {{ job.source }}
+            </span>
+        </div>
+
+        <div class="text-sm mb-3 space-y-1">
+            {% if job.hiring_email %}
+            <p>
+                <span class="text-gray-500">To:</span>
+                <span class="text-gray-800 font-mono">{{ job.hiring_email }}</span>
+                {% for hint in job.linkedin_hints %}
+                <a href="{{ hint }}" target="_blank"
+                   class="ml-2 text-blue-500 hover:underline text-xs">👤 Profile</a>
+                {% endfor %}
+            </p>
+            {% else %}
+            <p class="text-amber-600">
+                No email found
+                {% for hint in job.linkedin_hints %}
+                · <a href="{{ hint }}" target="_blank"
+                     class="text-blue-500 hover:underline">👤 Profile</a>
+                {% endfor %}
+            </p>
+            {% endif %}
+            <p>
+                <span class="text-gray-500">Subject:</span>
+                <span class="text-gray-700">{{ job.email_subject }}</span>
+            </p>
+        </div>
+
+        <form onsubmit="return false;">
+            <input type="hidden" name="url" value="{{ job.url }}">
+            <input type="hidden" name="subject" value="{{ job.email_subject }}">
+            <textarea name="body"
+                      class="w-full border border-gray-200 rounded-lg p-3 text-sm font-mono
+                             h-40 resize-y focus:outline-none focus:ring-2 focus:ring-blue-200 mb-3">{{ job.email_draft }}</textarea>
+
+            {% if resume_name %}
+            <p class="text-xs text-gray-400 mb-2">📎 {{ resume_name }}</p>
+            {% endif %}
+
+            <div class="flex items-center gap-3">
+                {% if job.hiring_email %}
+                <button onclick="sendJob(this, {{ loop.index0 }})"
+                        class="bg-blue-600 hover:bg-blue-700 text-white text-sm px-4 py-1.5
+                               rounded-lg transition-colors disabled:opacity-50">
+                    Send Email
+                </button>
+                {% endif %}
+                <a href="{{ job.apply_link }}" target="_blank"
+                   class="text-sm text-blue-600 hover:underline">Open Apply Link →</a>
+                <button onclick="skipJob(this, {{ loop.index0 }})"
+                        class="ml-auto text-sm text-gray-400 hover:text-gray-600">
+                    Skip
+                </button>
+            </div>
+        </form>
+    </div>
+    {% endfor %}
+
+    {% if not jobs %}
+    <div class="text-center py-16 text-gray-400">
+        <p class="text-lg mb-2">No pending jobs.</p>
+        <p class="text-sm">Run
+            <code class="bg-gray-100 px-1 py-0.5 rounded">python pipeline.py</code>
+            to fetch new listings.
+        </p>
+    </div>
+    {% endif %}
+
+</div>
+<script>
+async function sendJob(btn, idx) {
+    const card = document.getElementById('job-' + idx);
+    const form = card.querySelector('form');
+    btn.disabled = true;
+    btn.textContent = 'Sending…';
+    const fd = new FormData(form);
+    try {
+        const res = await fetch('/send', {method: 'POST', body: fd});
+        const data = await res.json();
+        if (data.ok) {
+            fadeOut(card);
+        } else {
+            alert('Error: ' + (data.error || 'unknown'));
+            btn.disabled = false;
+            btn.textContent = 'Send Email';
+        }
+    } catch (e) {
+        alert('Network error');
+        btn.disabled = false;
+        btn.textContent = 'Send Email';
+    }
+}
+
+async function skipJob(btn, idx) {
+    const card = document.getElementById('job-' + idx);
+    const form = card.querySelector('form');
+    const fd = new FormData(form);
+    await fetch('/skip', {method: 'POST', body: fd});
+    fadeOut(card);
+}
+
+function fadeOut(el) {
+    el.style.opacity = '0';
+    setTimeout(() => el.remove(), 500);
+}
+</script>
+</body>
+</html>
