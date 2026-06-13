@@ -3,6 +3,7 @@ import config
 from job_finder import collect_jobs, load_seen, save_seen
 from email_finder import find_email
 from composer import compose
+from notifier import notify
 
 
 def run():
@@ -39,6 +40,7 @@ def run():
     config.JOBS_FILE.write_text(json.dumps(results, indent=2))
     save_seen(seen)
     print(f"Done. {len(new_jobs)} new jobs saved to {config.JOBS_FILE}")
+    notify(new_jobs, len(all_jobs))
 
 
 if __name__ == "__main__":

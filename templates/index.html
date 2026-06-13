@@ -43,6 +43,7 @@
 
   {% for job in jobs %}
   <article id="job-{{ loop.index0 }}"
+           data-email="{{ job.hiring_email or '' }}"
            class="card-in bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
     <div class="flex">
       <!-- Left accent bar -->
@@ -133,16 +134,28 @@
 
           <div class="flex items-center gap-2">
             {% if job.hiring_email %}
-            <button onclick="sendJob(this, {{ loop.index0 }})"
-                    class="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700
-                           text-white text-sm font-medium px-4 py-1.5 rounded-lg
-                           transition-colors disabled:opacity-40">
-              <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                      d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
-              </svg>
-              Send
-            </button>
+              {% if smtp_ready %}
+              <button onclick="sendJob(this, {{ loop.index0 }})"
+                      class="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700
+                             text-white text-sm font-medium px-4 py-1.5 rounded-lg
+                             transition-colors disabled:opacity-40">
+                <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                        d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+                </svg>
+                Send
+              </button>
+              {% else %}
+              <button onclick="openGmail({{ loop.index0 }})"
+                      class="inline-flex items-center gap-1.5 bg-red-500 hover:bg-red-600
+                             text-white text-sm font-medium px-4 py-1.5 rounded-lg
+                             transition-colors">
+                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z"/>
+                </svg>
+                Open in Gmail
+              </button>
+              {% endif %}
             {% endif %}
             <a href="{{ job.apply_link }}" target="_blank"
                class="inline-flex items-center gap-1 text-sm text-blue-600 hover:text-blue-800
@@ -284,6 +297,18 @@ function resetBtn(btn, label, icon) {
   btn.disabled = false;
   label.textContent = 'Fetch Jobs';
   icon.classList.remove('spin');
+}
+
+function openGmail(idx) {
+  const card = document.getElementById('job-' + idx);
+  const to = card.dataset.email;
+  const subject = card.querySelector('[name=subject]').value;
+  const body = card.querySelector('[name=body]').value;
+  const url = 'https://mail.google.com/mail/?view=cm&fs=1'
+    + '&to=' + encodeURIComponent(to)
+    + '&su=' + encodeURIComponent(subject)
+    + '&body=' + encodeURIComponent(body);
+  window.open(url, '_blank');
 }
 </script>
 </body>

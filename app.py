@@ -42,7 +42,8 @@ def index():
     }
     pending = [j for j in all_jobs if j.get("status") == "pending"]
     resume_name = config.RESUME_PATH.name if config.RESUME_PATH and config.RESUME_PATH.is_file() else None
-    return render_template("index.html", jobs=pending, counts=counts, resume_name=resume_name)
+    smtp_ready = bool(config.SMTP_USER and config.SMTP_PASS and config.SMTP_PASS != "xxxx-xxxx-xxxx-xxxx")
+    return render_template("index.html", jobs=pending, counts=counts, resume_name=resume_name, smtp_ready=smtp_ready)
 
 
 @app.route("/jobs")
