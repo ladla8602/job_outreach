@@ -37,7 +37,7 @@ def index():
         "skipped": sum(1 for j in all_jobs if j.get("status") == "skipped"),
     }
     pending = [j for j in all_jobs if j.get("status") == "pending"]
-    resume_name = config.RESUME_PATH.name if config.RESUME_PATH and config.RESUME_PATH.exists() else None
+    resume_name = config.RESUME_PATH.name if config.RESUME_PATH and config.RESUME_PATH.is_file() else None
     return render_template("index.html", jobs=pending, counts=counts, resume_name=resume_name)
 
 
@@ -70,7 +70,7 @@ def send_email():
     msg["To"] = to_email
     msg.set_content(body or job["email_draft"])
 
-    if config.RESUME_PATH and config.RESUME_PATH.exists():
+    if config.RESUME_PATH and config.RESUME_PATH.is_file():
         with open(config.RESUME_PATH, "rb") as f:
             msg.add_attachment(
                 f.read(),
